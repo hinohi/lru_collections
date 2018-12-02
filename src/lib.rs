@@ -13,7 +13,7 @@ struct MyLinkedList<K, V> {
 struct Node<K, V> {
     next: Option<NonNull<Node<K, V>>>,
     prev: Option<NonNull<Node<K, V>>>,
-    key: NonNull<K>,
+    _key: NonNull<K>,
     value: V,
 }
 
@@ -21,7 +21,7 @@ pub struct LruHashMap<K, V>
 where
     K: Hash + Eq,
 {
-    max_size: usize,
+    _max_size: usize,
     map: HashMap<K, NonNull<Node<K, V>>>,
     list: MyLinkedList<K, V>,
 }
@@ -31,7 +31,7 @@ impl<K, T> Node<K, T> {
         Node {
             next: None,
             prev: None,
-            key: NonNull::new(key).unwrap(),
+            _key: NonNull::new(key).unwrap(),
             value,
         }
     }
@@ -45,10 +45,11 @@ impl<K, V> MyLinkedList<K, V> {
         }
     }
 
-    fn push_front_node(&mut self, mut node: Box<Node<K, V>>) {
-        node.next = self.head;
-        node.prev = None;
+    fn push_front_node(&mut self, mut node: Box<Node<K, V>>) -> NonNull<Node<K, V>> {
         unsafe {
+            node.next = self.head;
+            node.prev = None;
+
             let node = Some(Box::into_raw_non_null(node));
 
             match self.head {
@@ -58,9 +59,10 @@ impl<K, V> MyLinkedList<K, V> {
 
             self.head = node;
         }
+        self.head.unwrap()
     }
 
-    fn drop_back_node(&mut self) -> Option<Box<Node<K, V>>> {
+    fn _drop_back_node(&mut self) -> Option<Box<Node<K, V>>> {
         if self.tail.is_none() {
             return None;
         }
@@ -78,11 +80,12 @@ impl<K, V> MyLinkedList<K, V> {
         }
     }
 
-    unsafe fn unlink_and_push_front(&mut self, mut node: Box<Node<K, V>>) {
-        let node = node.as_mut();
-
+    unsafe fn unlink_and_push_front(&mut self, node: *mut Node<K, V>) {
+        let node = node.as_mut().unwrap();
         match node.prev {
-            Some(mut prev) => prev.as_mut().next = node.next.clone(),
+            Some(mut prev) => {
+                prev.as_mut().next = node.next.clone();
+            }
             // this node is the head node
             // nothing to do
             None => return,
@@ -110,7 +113,7 @@ where
 {
     pub fn new(max_size: usize) -> LruHashMap<K, V> {
         LruHashMap {
-            max_size,
+            _max_size: max_size,
             map: HashMap::new(),
             list: MyLinkedList::new(),
         }
@@ -124,23 +127,21 @@ where
         self.map.is_empty()
     }
 
-    pub fn insert(&mut self, k: K, v: V) {
+    pub fn insert(&mut self, mut k: K, v: V) {
         // TODO use entry API
         if self.map.contains_key(&k) {
             unsafe {
                 let mut node = self.map[&k];
-                self.list
-                    .unlink_and_push_front(Box::from_raw(node.as_ptr()));
+                self.list.unlink_and_push_front(node.as_ptr());
                 let node = node.as_mut();
                 node.value = v;
             }
             return;
         }
 
-        let mut k = k;
-        let mut node = Node::new(&mut k as *mut K, v);
-        self.map.insert(k, NonNull::new(&mut node).unwrap());
-        self.list.push_front_node(Box::new(node));
+        let node = Node::new(&mut k as *mut K, v);
+        let ptr = self.list.push_front_node(Box::new(node));
+        self.map.insert(k, ptr);
 
         // TODO drop
     }
@@ -155,9 +156,26 @@ where
             Some(ptr) => ptr,
         };
         unsafe {
-            let node = Box::from_raw(ptr.as_ptr());
-            self.list.unlink_and_push_front(node);
+            self.list.unlink_and_push_front(ptr.as_ptr());
             Some(&ptr.as_ref().value)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smoke() {
+        let mut m = LruHashMap::new(10);
+        assert_eq!(m.get("a"), None);
+        m.insert("a".to_string(), "A".to_string());
+        assert_eq!(m.get("a"), Some(&"A".to_string()));
+        m.insert("a".to_string(), "AA".to_string());
+        assert_eq!(m.get("a"), Some(&"AA".to_string()));
+        m.insert("b".to_string(), "B".to_string());
+        assert_eq!(m.get("a"), Some(&"AA".to_string()));
+        assert_eq!(m.get("b"), Some(&"B".to_string()));
     }
 }
