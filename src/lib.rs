@@ -2,6 +2,7 @@
 use std::borrow::Borrow;
 use std::boxed::Box;
 use std::collections::HashMap;
+use std::fmt::{self, Debug, Formatter};
 use std::hash::Hash;
 use std::ptr::NonNull;
 
@@ -13,27 +14,47 @@ struct MyLinkedList<K, V> {
 struct Node<K, V> {
     next: Option<NonNull<Node<K, V>>>,
     prev: Option<NonNull<Node<K, V>>>,
-    _key: NonNull<K>,
+    key: K,
     value: V,
 }
 
 pub struct LruHashMap<K, V>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Clone,
 {
-    _max_size: usize,
+    max_size: usize,
     map: HashMap<K, NonNull<Node<K, V>>>,
     list: MyLinkedList<K, V>,
 }
 
 impl<K, T> Node<K, T> {
-    fn new(key: *mut K, value: T) -> Node<K, T> {
+    fn new(key: K, value: T) -> Node<K, T> {
         Node {
             next: None,
             prev: None,
-            _key: NonNull::new(key).unwrap(),
+            key,
             value,
         }
+    }
+}
+
+impl<K, V> Debug for MyLinkedList<K, V>
+where
+    K: Debug,
+{
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let mut i = 0;
+        let mut now = self.head;
+        writeln!(f, "MyLinkedList")?;
+        while now.is_some() {
+            let node = now.unwrap();
+            unsafe {
+                writeln!(f, "  {} = {:?}", i, node.as_ref().key)?;
+                now = node.as_ref().next;
+            }
+            i += 1;
+        }
+        Ok(())
     }
 }
 
@@ -62,7 +83,7 @@ impl<K, V> MyLinkedList<K, V> {
         self.head.unwrap()
     }
 
-    fn _drop_back_node(&mut self) -> Option<Box<Node<K, V>>> {
+    fn pop_back_node(&mut self) -> Option<Box<Node<K, V>>> {
         if self.tail.is_none() {
             return None;
         }
@@ -109,11 +130,11 @@ impl<K, V> MyLinkedList<K, V> {
 
 impl<K, V> LruHashMap<K, V>
 where
-    K: Hash + Eq,
+    K: Hash + Eq + Clone,
 {
     pub fn new(max_size: usize) -> LruHashMap<K, V> {
         LruHashMap {
-            _max_size: max_size,
+            max_size,
             map: HashMap::new(),
             list: MyLinkedList::new(),
         }
@@ -127,7 +148,7 @@ where
         self.map.is_empty()
     }
 
-    pub fn insert(&mut self, mut k: K, v: V) {
+    pub fn insert(&mut self, k: K, v: V) {
         // TODO use entry API
         if self.map.contains_key(&k) {
             unsafe {
@@ -139,11 +160,20 @@ where
             return;
         }
 
-        let node = Node::new(&mut k as *mut K, v);
+        // insert new node
+        let node = Node::new(k.clone(), v);
         let ptr = self.list.push_front_node(Box::new(node));
         self.map.insert(k, ptr);
 
-        // TODO drop
+        // check size
+        if self.max_size == 0 || self.map.len() <= self.max_size {
+            return;
+        }
+
+        // drop oldest node
+        let tail = self.list.pop_back_node().unwrap();
+        let key = tail.key;
+        self.map.remove(&key);
     }
 
     pub fn get<Q>(&mut self, k: &Q) -> Option<&V>
@@ -177,5 +207,33 @@ mod tests {
         m.insert("b".to_string(), "B".to_string());
         assert_eq!(m.get("a"), Some(&"AA".to_string()));
         assert_eq!(m.get("b"), Some(&"B".to_string()));
+    }
+
+    #[test]
+    fn lru() {
+        let mut m = LruHashMap::new(2);
+        m.insert(1, 10);
+        m.insert(2, 20);
+        assert_eq!(m.len(), 2);
+        m.insert(3, 30);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m.get(&1), None);
+        assert_eq!(m.get(&2), Some(&20));
+        m.insert(4, 40);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m.get(&3), None);
+        assert_eq!(m.get(&2), Some(&20));
+        assert_eq!(m.get(&4), Some(&40));
+    }
+
+    #[test]
+    fn unlimited() {
+        let mut m = LruHashMap::new(0);
+        for i in 0..100000 {
+            m.insert(i, i);
+        }
+        for i in (0..100000).rev() {
+            assert_eq!(m.get(&i), Some(&i));
+        }
     }
 }
