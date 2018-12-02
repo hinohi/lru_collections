@@ -104,9 +104,7 @@ impl<K, V> LinkedList<K, V> {
     unsafe fn unlink_and_push_front(&mut self, node: *mut Node<K, V>) {
         let node = node.as_mut().unwrap();
         match node.prev {
-            Some(mut prev) => {
-                prev.as_mut().next = node.next;
-            }
+            Some(mut prev) => prev.as_mut().next = node.next,
             // this node is the head node
             // nothing to do
             None => return,
@@ -171,8 +169,7 @@ where
 
         // drop oldest node
         let tail = self.list.pop_back().unwrap();
-        let key = tail.key;
-        self.map.remove(&key);
+        self.map.remove(&tail.key);
         None
     }
 
