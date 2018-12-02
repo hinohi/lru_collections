@@ -5,34 +5,47 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::ptr::NonNull;
 
-struct MyLinkedList<T> {
-    head: Option<NonNull<Node<T>>>,
-    tail: Option<NonNull<Node<T>>>,
+struct MyLinkedList<K, V> {
+    head: Option<NonNull<Node<K, V>>>,
+    tail: Option<NonNull<Node<K, V>>>,
 }
 
-struct Node<T> {
-    next: Option<NonNull<Node<T>>>,
-    prev: Option<NonNull<Node<T>>>,
-    element: T,
+struct Node<K, V> {
+    next: Option<NonNull<Node<K, V>>>,
+    prev: Option<NonNull<Node<K, V>>>,
+    key: NonNull<K>,
+    value: V,
 }
 
 pub struct LruHashMap<K, V>
 where
     K: Hash + Eq,
 {
-    map: HashMap<K, Node<V>>,
-    list: MyLinkedList<V>,
+    max_size: usize,
+    map: HashMap<K, NonNull<Node<K, V>>>,
+    list: MyLinkedList<K, V>,
 }
 
-impl<T> MyLinkedList<T> {
-    fn new() -> MyLinkedList<T> {
+impl<K, T> Node<K, T> {
+    fn new(key: *mut K, value: T) -> Node<K, T> {
+        Node {
+            next: None,
+            prev: None,
+            key: NonNull::new(key).unwrap(),
+            value,
+        }
+    }
+}
+
+impl<K, V> MyLinkedList<K, V> {
+    fn new() -> MyLinkedList<K, V> {
         MyLinkedList {
             head: None,
             tail: None,
         }
     }
 
-    fn push_front_node(&mut self, mut node: Box<Node<T>>) {
+    fn push_front_node(&mut self, mut node: Box<Node<K, V>>) {
         node.next = self.head;
         node.prev = None;
         unsafe {
@@ -47,9 +60,9 @@ impl<T> MyLinkedList<T> {
         }
     }
 
-    fn drop_back_node(&mut self) {
+    fn drop_back_node(&mut self) -> Option<Box<Node<K, V>>> {
         if self.tail.is_none() {
-            return;
+            return None;
         }
 
         unsafe {
@@ -60,11 +73,12 @@ impl<T> MyLinkedList<T> {
                 None => self.head = None,
                 Some(mut tail) => tail.as_mut().next = None,
             }
-            // TODO node がリークしてない？
+
+            Some(Box::from_raw(node))
         }
     }
 
-    unsafe fn unlink_and_push_front(&mut self, mut node: Box<Node<T>>) {
+    unsafe fn unlink_and_push_front(&mut self, mut node: Box<Node<K, V>>) {
         let node = node.as_mut();
 
         match node.prev {
@@ -94,8 +108,9 @@ impl<K, V> LruHashMap<K, V>
 where
     K: Hash + Eq,
 {
-    pub fn new() -> LruHashMap<K, V> {
+    pub fn new(max_size: usize) -> LruHashMap<K, V> {
         LruHashMap {
+            max_size,
             map: HashMap::new(),
             list: MyLinkedList::new(),
         }
@@ -107,5 +122,42 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
+    }
+
+    pub fn insert(&mut self, k: K, v: V) {
+        // TODO use entry API
+        if self.map.contains_key(&k) {
+            unsafe {
+                let mut node = self.map[&k];
+                self.list
+                    .unlink_and_push_front(Box::from_raw(node.as_ptr()));
+                let node = node.as_mut();
+                node.value = v;
+            }
+            return;
+        }
+
+        let mut k = k;
+        let mut node = Node::new(&mut k as *mut K, v);
+        self.map.insert(k, NonNull::new(&mut node).unwrap());
+        self.list.push_front_node(Box::new(node));
+
+        // TODO drop
+    }
+
+    pub fn get<Q>(&mut self, k: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let ptr = match self.map.get(k) {
+            None => return None,
+            Some(ptr) => ptr,
+        };
+        unsafe {
+            let node = Box::from_raw(ptr.as_ptr());
+            self.list.unlink_and_push_front(node);
+            Some(&ptr.as_ref().value)
+        }
     }
 }
