@@ -7,7 +7,7 @@ use std::hash::Hash;
 use std::mem;
 use std::ptr::NonNull;
 
-struct MyLinkedList<K, V> {
+struct LinkedList<K, V> {
     head: Option<NonNull<Node<K, V>>>,
     tail: Option<NonNull<Node<K, V>>>,
 }
@@ -19,13 +19,13 @@ struct Node<K, V> {
     value: V,
 }
 
-pub struct LruHashMap<K, V>
+pub struct LruMap<K, V>
 where
     K: Hash + Eq + Clone,
 {
     max_size: usize,
     map: HashMap<K, NonNull<Node<K, V>>>,
-    list: MyLinkedList<K, V>,
+    list: LinkedList<K, V>,
 }
 
 impl<K, T> Node<K, T> {
@@ -39,7 +39,7 @@ impl<K, T> Node<K, T> {
     }
 }
 
-impl<K, V> Debug for MyLinkedList<K, V>
+impl<K, V> Debug for LinkedList<K, V>
 where
     K: Debug,
 {
@@ -59,15 +59,15 @@ where
     }
 }
 
-impl<K, V> MyLinkedList<K, V> {
-    fn new() -> MyLinkedList<K, V> {
-        MyLinkedList {
+impl<K, V> LinkedList<K, V> {
+    fn new() -> LinkedList<K, V> {
+        LinkedList {
             head: None,
             tail: None,
         }
     }
 
-    fn push_front_node(&mut self, mut node: Box<Node<K, V>>) -> NonNull<Node<K, V>> {
+    fn push_front(&mut self, mut node: Box<Node<K, V>>) -> NonNull<Node<K, V>> {
         unsafe {
             node.next = self.head;
             node.prev = None;
@@ -84,7 +84,7 @@ impl<K, V> MyLinkedList<K, V> {
         self.head.unwrap()
     }
 
-    fn pop_back_node(&mut self) -> Option<Box<Node<K, V>>> {
+    fn pop_back(&mut self) -> Option<Box<Node<K, V>>> {
         if self.tail.is_none() {
             return None;
         }
@@ -129,15 +129,15 @@ impl<K, V> MyLinkedList<K, V> {
     }
 }
 
-impl<K, V> LruHashMap<K, V>
+impl<K, V> LruMap<K, V>
 where
     K: Hash + Eq + Clone,
 {
-    pub fn new(max_size: usize) -> LruHashMap<K, V> {
-        LruHashMap {
+    pub fn new(max_size: usize) -> LruMap<K, V> {
+        LruMap {
             max_size,
             map: HashMap::new(),
-            list: MyLinkedList::new(),
+            list: LinkedList::new(),
         }
     }
 
@@ -162,7 +162,7 @@ where
 
         // insert new node
         let node = Node::new(k.clone(), v);
-        let ptr = self.list.push_front_node(Box::new(node));
+        let ptr = self.list.push_front(Box::new(node));
         self.map.insert(k, ptr);
 
         // check size
@@ -171,7 +171,7 @@ where
         }
 
         // drop oldest node
-        let tail = self.list.pop_back_node().unwrap();
+        let tail = self.list.pop_back().unwrap();
         let key = tail.key;
         self.map.remove(&key);
         None
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn smoke() {
-        let mut m = LruHashMap::new(10);
+        let mut m = LruMap::new(10);
         assert_eq!(m.get("a"), None);
         assert_eq!(m.insert("a".to_string(), "A".to_string()), None);
         assert_eq!(m.get("a"), Some(&"A".to_string()));
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn lru() {
-        let mut m = LruHashMap::new(2);
+        let mut m = LruMap::new(2);
         m.insert(1, 10);
         m.insert(2, 20);
         assert_eq!(m.len(), 2);
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn unlimited() {
-        let mut m = LruHashMap::new(0);
+        let mut m = LruMap::new(0);
         for i in 0..100000 {
             assert_eq!(m.insert(i, i), None);
         }
