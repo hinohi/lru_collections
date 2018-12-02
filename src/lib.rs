@@ -68,10 +68,9 @@ impl<K, V> LinkedList<K, V> {
     }
 
     fn push_front(&mut self, mut node: Box<Node<K, V>>) -> NonNull<Node<K, V>> {
+        node.next = self.head;
+        node.prev = None;
         unsafe {
-            node.next = self.head;
-            node.prev = None;
-
             let node = Some(Box::into_raw_non_null(node));
 
             match self.head {
@@ -106,7 +105,7 @@ impl<K, V> LinkedList<K, V> {
         let node = node.as_mut().unwrap();
         match node.prev {
             Some(mut prev) => {
-                prev.as_mut().next = node.next.clone();
+                prev.as_mut().next = node.next;
             }
             // this node is the head node
             // nothing to do
@@ -114,10 +113,10 @@ impl<K, V> LinkedList<K, V> {
         }
 
         match node.next {
-            Some(mut next) => next.as_mut().prev = node.prev.clone(),
+            Some(mut next) => next.as_mut().prev = node.prev,
             // this node is the tail node
             // node.prev is Some<_> in this branch
-            None => self.tail = node.prev.clone(),
+            None => self.tail = node.prev,
         };
 
         node.next = self.head;
