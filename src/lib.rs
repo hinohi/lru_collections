@@ -4,6 +4,7 @@ use std::boxed::Box;
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::Hash;
+use std::mem;
 use std::ptr::NonNull;
 
 struct MyLinkedList<K, V> {
@@ -148,16 +149,15 @@ where
         self.map.is_empty()
     }
 
-    pub fn insert(&mut self, k: K, v: V) {
+    pub fn insert(&mut self, k: K, v: V) -> Option<V> {
         // TODO use entry API
         if self.map.contains_key(&k) {
             unsafe {
                 let mut node = self.map[&k];
                 self.list.unlink_and_push_front(node.as_ptr());
                 let node = node.as_mut();
-                node.value = v;
+                return Some(mem::replace(&mut node.value, v));
             }
-            return;
         }
 
         // insert new node
@@ -167,13 +167,14 @@ where
 
         // check size
         if self.max_size == 0 || self.map.len() <= self.max_size {
-            return;
+            return None;
         }
 
         // drop oldest node
         let tail = self.list.pop_back_node().unwrap();
         let key = tail.key;
         self.map.remove(&key);
+        None
     }
 
     pub fn get<Q>(&mut self, k: &Q) -> Option<&V>
@@ -200,11 +201,14 @@ mod tests {
     fn smoke() {
         let mut m = LruHashMap::new(10);
         assert_eq!(m.get("a"), None);
-        m.insert("a".to_string(), "A".to_string());
+        assert_eq!(m.insert("a".to_string(), "A".to_string()), None);
         assert_eq!(m.get("a"), Some(&"A".to_string()));
-        m.insert("a".to_string(), "AA".to_string());
+        assert_eq!(
+            m.insert("a".to_string(), "AA".to_string()),
+            Some("A".to_string())
+        );
         assert_eq!(m.get("a"), Some(&"AA".to_string()));
-        m.insert("b".to_string(), "B".to_string());
+        assert_eq!(m.insert("b".to_string(), "B".to_string()), None);
         assert_eq!(m.get("a"), Some(&"AA".to_string()));
         assert_eq!(m.get("b"), Some(&"B".to_string()));
     }
@@ -230,7 +234,7 @@ mod tests {
     fn unlimited() {
         let mut m = LruHashMap::new(0);
         for i in 0..100000 {
-            m.insert(i, i);
+            assert_eq!(m.insert(i, i), None);
         }
         for i in (0..100000).rev() {
             assert_eq!(m.get(&i), Some(&i));
